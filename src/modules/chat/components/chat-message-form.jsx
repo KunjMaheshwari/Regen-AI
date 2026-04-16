@@ -6,15 +6,23 @@ import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
+import { useAIModels } from '@/modules/ai-agent/hook/ai-agent'
+import { ModelSelector } from './model-selector'
 
 const ChatMessageForm = ({ initialMessage, onMessageChange }) => {
 
+    const { data: models, isPending } = useAIModels();
+    const [selectedModel, setSelectedModel] = useState();
     const [message, setMessage] = useState("");
+    const activeModelId = selectedModel ?? models?.models?.[0]?.id;
 
     useEffect(() => {
         if (initialMessage) {
-            setMessage(initialMessage)
+            const frameId = requestAnimationFrame(() => {
+                setMessage(initialMessage)
+            })
             onMessageChange?.("")
+            return () => cancelAnimationFrame(frameId)
         }
     }, [initialMessage, onMessageChange])
 
@@ -51,7 +59,18 @@ const ChatMessageForm = ({ initialMessage, onMessageChange }) => {
                     <div className="flex items-center justify-between gap-2 px-3 py-2 border-t ">
                         {/* Left side tools */}
                         <div className="flex items-center gap-1">
-                            <Button variant={"outline"}>Select a Model</Button>
+                            {isPending ? (
+                                <>
+                                    <Spinner />
+                                </>
+                            ) : (
+                                <ModelSelector
+                                    models={models?.models}
+                                    selectedModelId={activeModelId}
+                                    onModelSelect={setSelectedModel}
+                                    className="ml-1"
+                                />
+                            )}
                         </div>
 
                         {/* Submit Button */}
