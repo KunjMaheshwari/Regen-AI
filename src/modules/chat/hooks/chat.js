@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createChatWithMessage } from "../actions";
+import { createChatWithMessage, deleteChat } from "../actions";
 
 
 export const useCreateChat = () => {
@@ -27,4 +27,20 @@ export const useCreateChat = () => {
             toast.error("Failed to create chat!");
         }
     });
+};
+
+
+export const useDeleteChat = (chatId) => {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  return useMutation({
+    mutationFn: () => deleteChat(chatId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(["chats"]);
+      router.push("/");
+    },
+    onError: () => {
+      toast.error("Failed to delete chat");
+    },
+  });
 };
