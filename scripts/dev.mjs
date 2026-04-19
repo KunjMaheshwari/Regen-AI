@@ -54,6 +54,8 @@ function getCommand(pid) {
 }
 
 run("docker compose up -d");
+run("npx prisma generate");
+run("npx prisma migrate deploy");
 
 const existingPid = getPort3000Pid();
 

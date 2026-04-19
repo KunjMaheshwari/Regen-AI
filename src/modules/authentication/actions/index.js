@@ -3,7 +3,6 @@
 import db from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { id } from "date-fns/locale";
 
 export const currentUser = async ()=>{
     try{
