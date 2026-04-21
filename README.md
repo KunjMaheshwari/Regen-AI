@@ -12,11 +12,21 @@ Unlike basic “chat demo” projects, Regen-AI intentionally focuses on the rea
 
 ## Demo
 
-> Add screenshots/GIFs here (placeholders)
+<p align="center">
+  <img src="docs/Home Page.jpg" width="80%" />
+</p>
 
-- `![Chat UI](docs/screenshots/chat-ui.png)`
-- `![Streaming Response](docs/gifs/streaming.gif)`
-- `![Error Handling](docs/screenshots/error-states.png)`
+<p align="center">
+  <img src="docs/AI Generated Response page.jpg" width="80%" />
+</p>
+
+<p align="center">
+  <img src="docs/Multiple Models.jpg" width="80%" />
+</p>
+
+<p align="center">
+  <img src="docs/Prisma Visualizer.jpg" width="80%" />
+</p>
 
 ---
 
