@@ -1,5 +1,5 @@
 "use client";;
-import { Button } from "@/components/ui/button";
+import { ChatActionButton, chatActionButtonClassName } from "@/components/ui/chat-action-button";
 import {
   ScrollArea,
   ScrollBar,
@@ -24,24 +24,21 @@ export const Suggestion = ({
   suggestion,
   onClick,
   className,
-  variant = "outline",
-  size = "sm",
+  autoSubmit = false,
   children,
   ...props
 }) => {
   const handleClick = useCallback(() => {
-    onClick?.(suggestion);
-  }, [onClick, suggestion]);
+    onClick?.(suggestion, { autoSubmit });
+  }, [autoSubmit, onClick, suggestion]);
 
   return (
-    <Button
-      className={cn("cursor-pointer rounded-full px-4", className)}
+    <ChatActionButton
+      className={cn(chatActionButtonClassName, "w-auto shrink-0 cursor-pointer", className)}
       onClick={handleClick}
-      size={size}
       type="button"
-      variant={variant}
       {...props}>
       {children || suggestion}
-    </Button>
+    </ChatActionButton>
   );
 };

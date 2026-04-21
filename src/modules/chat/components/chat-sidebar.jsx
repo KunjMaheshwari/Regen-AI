@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { PlusIcon, SearchIcon, Trash, EllipsisIcon } from 'lucide-react';
+import { ChatActionButton } from "@/components/ui/chat-action-button";
 import UserButton from '@/modules/authentication/components/user-button';
 import { useChatStore } from '../store/chat-store';
 import DeleteChatModal from './model/chat-delete-modal';
@@ -142,10 +143,10 @@ const ChatSidebar = ({ user, chats }) => {
             </div>
             <div className='p-4'>
                 <Link href={"/"}>
-                    <Button className={"w-full"}>
+                    <ChatActionButton className={"w-full"}>
                         <PlusIcon className='mr-2 h-4 w-4' />
                         New chat
-                    </Button>
+                    </ChatActionButton>
                 </Link>
             </div>
 

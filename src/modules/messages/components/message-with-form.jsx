@@ -11,10 +11,18 @@ import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { PromptInput, PromptInputBody, PromptInputButton, PromptInputSubmit, PromptInputTextarea, PromptInputToolbar, PromptInputTools } from "@/components/ai-elements/prompt-input";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Response } from "@/components/ai-elements/response";
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { Spinner } from "@/components/ui/spinner";
 import { useAIModels } from "@/modules/ai-agent/hook/ai-agent";
 import { useGetChatById } from "@/modules/chat/hooks/chat";
 import { useChatStore } from "@/modules/chat/store/chat-store";
+
+const promptSuggestions = [
+  "Summarize the last discussion into action items.",
+  "Turn this idea into a product requirements draft.",
+  "Review this plan and point out the biggest risks.",
+  "Write a concise follow-up message I can send.",
+];
 
 function normalizeStoredMessage(message) {
   if (!message?.id || !message?.messageRole) {
@@ -283,6 +291,15 @@ export default function MessageViewWithForm({ chatId }) {
     await stop();
   };
 
+  const handleSuggestionClick = async (suggestion) => {
+    console.log("[chat-ui] suggestion selected", {
+      chatId,
+      suggestion,
+    });
+
+    setInput(suggestion);
+  };
+
   if (isPending) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -369,6 +386,17 @@ export default function MessageViewWithForm({ chatId }) {
         </Conversation>
 
         <PromptInput className="mt-4" onSubmit={handleSubmit}>
+          {messages.length === 0 && (
+            <Suggestions className="px-3 py-3">
+              {promptSuggestions.map(suggestion => (
+                <Suggestion
+                  key={suggestion}
+                  onClick={handleSuggestionClick}
+                  suggestion={suggestion}
+                />
+              ))}
+            </Suggestions>
+          )}
           <PromptInputBody>
             <PromptInputTextarea
               disabled={status === "streaming"}

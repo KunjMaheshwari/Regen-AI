@@ -9,8 +9,119 @@ const provider = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY,
 });
 
+const DEFAULT_MODEL = "openai/gpt-4o-mini";
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 700;
+const FALLBACK_MESSAGE =
+  "The AI service is temporarily unavailable. Please try again in a moment.";
+
 function jsonResponse(payload, status = 200) {
   return Response.json(payload, { status });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getStatusCode(error) {
+  if (typeof error?.statusCode === "number") {
+    return error.statusCode;
+  }
+
+  if (typeof error?.status === "number") {
+    return error.status;
+  }
+
+  if (typeof error?.response?.status === "number") {
+    return error.response.status;
+  }
+
+  if (typeof error?.cause?.status === "number") {
+    return error.cause.status;
+  }
+
+  return 500;
+}
+
+function getErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unknown error";
+}
+
+function isRetryableError(error) {
+  const status = getStatusCode(error);
+  return status === 429 || status >= 500;
+}
+
+function createFallbackStreamResponse(message, originalMessages, status = 200) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "start",
+            messageId: crypto.randomUUID(),
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "text-start",
+            id: "fallback-text",
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "text-delta",
+            id: "fallback-text",
+            delta: message,
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "text-end",
+            id: "fallback-text",
+          })}\n\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "finish",
+            finishReason: "stop",
+          })}\n\n`,
+        ),
+      );
+      controller.close();
+    },
+  });
+
+  console.warn("[/api/chat] Returning fallback stream response", {
+    status,
+    originalMessages: originalMessages.length,
+  });
+
+  return new Response(stream, {
+    status,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 function normalizeTextPart(part) {
@@ -132,9 +243,14 @@ export async function POST(request) {
     const {
       chatId,
       messages: incomingMessages,
-      model,
+      model: requestedModel,
       skipUserMessage = false,
     } = body;
+
+    const model =
+      typeof requestedModel === "string" && requestedModel.trim()
+        ? requestedModel.trim()
+        : DEFAULT_MODEL;
 
     console.log("[/api/chat] Incoming request", {
       chatId,
@@ -149,11 +265,6 @@ export async function POST(request) {
         { error: "Missing OPENROUTER_API_KEY on the server." },
         500,
       );
-    }
-
-    if (!model || typeof model !== "string") {
-      console.error("[/api/chat] Missing model");
-      return jsonResponse({ error: "Model is required." }, 400);
     }
 
     let uiMessages = Array.isArray(incomingMessages)
@@ -190,29 +301,87 @@ export async function POST(request) {
       totalMessages: modelMessages.length,
       lastRole: uiMessages.at(-1)?.role,
       lastPreview: getMessagePreview(uiMessages.at(-1)),
+      model,
     });
 
-    const result = streamText({
-      model: provider.chat(model),
-      system: CHAT_SYSTEM_PROMPT,
-      messages: modelMessages,
-      onChunk: async ({ chunk }) => {
-        if (chunk.type === "text-delta" && chunk.text) {
-          console.log("[/api/chat] Streaming chunk", {
-            length: chunk.text.length,
-          });
-        }
-      },
-      onError: async ({ error }) => {
-        console.error("[/api/chat] Provider stream error", error);
-      },
-      onFinish: async ({ text, finishReason }) => {
-        console.log("[/api/chat] Provider stream finished", {
-          finishReason,
-          textLength: text?.length ?? 0,
+    let result;
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+      try {
+        console.log("[/api/chat] Starting provider stream attempt", {
+          attempt: attempt + 1,
+          maxAttempts: MAX_RETRIES + 1,
+          model,
         });
-      },
-    });
+
+        result = streamText({
+          model: provider.chat(model),
+          system: CHAT_SYSTEM_PROMPT,
+          messages: modelMessages,
+          onChunk: async ({ chunk }) => {
+            if (chunk.type === "text-delta" && chunk.text) {
+              console.log("[/api/chat] Streaming chunk", {
+                length: chunk.text.length,
+                attempt: attempt + 1,
+              });
+            }
+          },
+          onError: async ({ error }) => {
+            console.error("[/api/chat] Provider stream error", {
+              attempt: attempt + 1,
+              status: getStatusCode(error),
+              message: getErrorMessage(error),
+            });
+          },
+          onFinish: async ({ text, finishReason }) => {
+            console.log("[/api/chat] Provider stream finished", {
+              attempt: attempt + 1,
+              finishReason,
+              textLength: text?.length ?? 0,
+            });
+          },
+        });
+
+        break;
+      } catch (error) {
+        lastError = error;
+        const status = getStatusCode(error);
+        const retryable = isRetryableError(error);
+
+        console.error("[/api/chat] Failed to start provider stream", {
+          attempt: attempt + 1,
+          status,
+          retryable,
+          message: getErrorMessage(error),
+        });
+
+        if (!retryable || attempt === MAX_RETRIES) {
+          break;
+        }
+
+        await sleep(RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+
+    if (!result) {
+      const status = getStatusCode(lastError);
+      const message =
+        status === 429
+          ? "The AI provider is rate-limited right now. Please retry shortly."
+          : FALLBACK_MESSAGE;
+
+      if (status === 429 || status >= 500) {
+        return createFallbackStreamResponse(message, uiMessages, 200);
+      }
+
+      return jsonResponse(
+        {
+          error: getErrorMessage(lastError),
+        },
+        status || 500,
+      );
+    }
 
     return result.toUIMessageStreamResponse({
       originalMessages: uiMessages,
@@ -274,8 +443,18 @@ export async function POST(request) {
         }
       },
       onError: error => {
-        console.error("[/api/chat] UI stream response error", error);
-        return "The assistant response failed.";
+        const status = getStatusCode(error);
+        const message =
+          status === 429
+            ? "The AI provider is rate-limited right now. Please retry shortly."
+            : FALLBACK_MESSAGE;
+
+        console.error("[/api/chat] UI stream response error", {
+          status,
+          message: getErrorMessage(error),
+        });
+
+        return message;
       },
     });
   } catch (error) {

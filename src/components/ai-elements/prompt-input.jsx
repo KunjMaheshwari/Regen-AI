@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 /** biome-ignore-all lint/performance/noImgElement: "AI Elements is framework agnostic" */
 
 "use client";;
