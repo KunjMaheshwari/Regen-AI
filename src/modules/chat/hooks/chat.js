@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createChatWithMessage, deleteChat } from "../actions";
@@ -28,6 +28,13 @@ export const useCreateChat = () => {
         }
     });
 };
+
+export const useGetChatById = (chatId)=>{
+  return useQuery({
+    queryKey:["chats", chatId],
+    queryFn:()=>getChatsById(chatId)
+  })
+}
 
 
 export const useDeleteChat = (chatId) => {
