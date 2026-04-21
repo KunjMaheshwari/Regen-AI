@@ -1,6 +1,6 @@
 # Regen-AI — Streaming AI Chat (Next.js + OpenRouter + Prisma/Postgres)
 
-Regen-AI is a **portfolio-grade, production-minded AI chat application** built with **Next.js (App Router)**. It supports **streaming responses** (token-by-token), integrates with **OpenRouter** for model access, and persists conversations in **PostgreSQL via Prisma**.
+Regen-AI is an AI chat application** built with **Next.js (App Router)**. It supports **streaming responses** (token-by-token), integrates with **OpenRouter** for model access, and persists conversations in **PostgreSQL via Prisma**.
 
 Unlike basic “chat demo” projects, Regen-AI intentionally focuses on the real-world concerns that show up in production LLM systems:
 - **Streaming UX** for responsiveness and perceived latency
