@@ -49,13 +49,16 @@ const CHAT_TAB_MESSAGE = [
 const ChatWelcomeTabs = ({ userName, onMessageSelect }) => {
 
     const [activeTab, setActiveTab] = useState(0);
+    const firstName = typeof userName === "string" && userName.trim().length > 0
+        ? userName.trim().split(/\s+/)[0]
+        : "there";
 
 
     return (
         <div className='flex flex-col items-center justify-center px-4'>
             <div className='w-full max-w-3xl space-y-8'>
                 <h1 className='text-4xl font-semibold'>
-                    Hi How Can I Help You, {userName.slice(0, userName.indexOf(" ")) || userName}
+                    Hi How Can I Help You, {firstName}
                 </h1>
 
                 <div className='flex flex-wrap gap-2 w-full'>

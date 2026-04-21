@@ -107,21 +107,27 @@ export const getChatById = async (chatId) => {
     }
 
     try {
-        const chat = await db.findUnique({
+        const chat = await db.chat.findUnique({
             where: {
                 id: chatId,
-                userId: user.id
             },
             include: {
                 message: true
             }
-        })
+        });
+
+        if (!chat || chat.userId !== user.id) {
+            return {
+                success: false,
+                message: "Chat not found"
+            };
+        }
 
         return {
             success: true,
             message: "Chat Fetched successfully",
             data: chat
-        }
+        };
     } catch (error) {
         console.error("Error fetching chats:", error);
         return {

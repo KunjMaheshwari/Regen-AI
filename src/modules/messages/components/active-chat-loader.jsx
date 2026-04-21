@@ -21,7 +21,13 @@ const ActiveChatLoader = ({ chatId }) => {
     if (!data || !data.success || !data.data) return;
 
     const chat = data.data;
-    setMessages(chat.messages || []);
+    const chatMessages = Array.isArray(chat.message)
+      ? chat.message
+      : Array.isArray(chat.messages)
+        ? chat.messages
+        : [];
+
+    setMessages(chatMessages);
 
     if (!chats?.some((c) => c.id === chat.id)) {
       addChat(chat);
