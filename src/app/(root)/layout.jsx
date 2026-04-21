@@ -1,23 +1,36 @@
-import { auth } from '@/lib/auth'
-import { currentUser } from '@/modules/authentication/actions';
 import ChatSidebar from '@/modules/chat/components/chat-sidebar';
 import Header from '@/modules/chat/components/header';
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers'
 import React from 'react'
-import { getAllChats } from '@/modules/chat/actions';
+import { getE2ETestUser, isE2ETestMode } from '@/lib/e2e-test-mode';
 
 export const dynamic = "force-dynamic";
 
 const layout = async ({ children }) => {
+    let session = null;
+    let user = null;
+    let chats = [];
 
-    const session = await auth.api.getSession({
-        headers: await headers()
-    });
+    if (isE2ETestMode()) {
+        session = { user: getE2ETestUser() };
+        user = getE2ETestUser();
+    } else {
+        const [{ auth }, { headers }, { currentUser }, { getAllChats }] = await Promise.all([
+            import('@/lib/auth'),
+            import('next/headers'),
+            import('@/modules/authentication/actions'),
+            import('@/modules/chat/actions'),
+        ]);
 
-    const user = await currentUser();
+        session = await auth.api.getSession({
+            headers: await headers()
+        });
 
-    const {data:chats} = await getAllChats();
+        user = await currentUser();
+
+        const chatsResponse = await getAllChats();
+        chats = chatsResponse?.data ?? [];
+    }
 
     if (!session) {
         redirect("/sign-in");

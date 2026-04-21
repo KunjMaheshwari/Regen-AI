@@ -1,13 +1,37 @@
 "use server";
 
-import db from "@/lib/db";
-import { currentUser } from "@/modules/authentication/actions";
-import { MessageRole, MessageType } from "@prisma/client";
-import { success } from "better-auth";
 import { revalidatePath } from "next/cache";
+import { getE2ETestChat, isE2ETestMode } from "@/lib/e2e-test-mode";
 
 export const createChatWithMessage = async (values) => {
     try {
+        if (isE2ETestMode()) {
+            const { content, model } = values;
+
+            return {
+                success: true,
+                message: "Chat created successfully",
+                data: {
+                    ...getE2ETestChat("playwright-chat"),
+                    title: content?.slice(0, 50) || "Playwright Chat",
+                    model: model || "openai/gpt-4o-mini",
+                    message: content ? [{
+                        id: "playwright-user-message",
+                        content,
+                        messageRole: "USER",
+                        messageType: "NORMAL",
+                        model: model || "openai/gpt-4o-mini",
+                        createdAt: new Date(0),
+                    }] : [],
+                }
+            };
+        }
+
+        const [{ currentUser }, { MessageRole, MessageType }, { default: db }] = await Promise.all([
+            import("@/modules/authentication/actions"),
+            import("@prisma/client"),
+            import("@/lib/db"),
+        ]);
         const user = await currentUser();
 
         if (!user)
@@ -61,6 +85,18 @@ export const createChatWithMessage = async (values) => {
 
 export const getAllChats = async () => {
     try {
+        if (isE2ETestMode()) {
+            return {
+                success: true,
+                message: "Chats fetched successfully",
+                data: []
+            };
+        }
+
+        const [{ currentUser }, { default: db }] = await Promise.all([
+            import("@/modules/authentication/actions"),
+            import("@/lib/db"),
+        ]);
         const user = await currentUser();
 
         if (!user) {
@@ -97,6 +133,18 @@ export const getAllChats = async () => {
 }
 
 export const getChatById = async (chatId) => {
+    if (isE2ETestMode()) {
+        return {
+            success: true,
+            message: "Chat Fetched successfully",
+            data: getE2ETestChat(chatId),
+        };
+    }
+
+    const [{ currentUser }, { default: db }] = await Promise.all([
+        import("@/modules/authentication/actions"),
+        import("@/lib/db"),
+    ]);
     const user = await currentUser();
 
     if (!user) {
@@ -140,6 +188,17 @@ export const getChatById = async (chatId) => {
 
 export const deleteChat = async (chatId) => {
     try {
+        if (isE2ETestMode()) {
+            return {
+                success: true,
+                message: "Chat deleted successfully"
+            };
+        }
+
+        const [{ currentUser }, { default: db }] = await Promise.all([
+            import("@/modules/authentication/actions"),
+            import("@/lib/db"),
+        ]);
         const user = await currentUser();
 
         if (!user) {

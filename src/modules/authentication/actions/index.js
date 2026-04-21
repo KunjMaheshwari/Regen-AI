@@ -1,11 +1,19 @@
 "use server"
 
-import db from "@/lib/db";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getE2ETestUser, isE2ETestMode } from "@/lib/e2e-test-mode";
 
 export const currentUser = async ()=>{
     try{
+        if (isE2ETestMode()) {
+            return getE2ETestUser();
+        }
+
+        const [{ auth }, { headers }, { default: db }] = await Promise.all([
+            import("@/lib/auth"),
+            import("next/headers"),
+            import("@/lib/db"),
+        ]);
+
         const session = await auth.api.getSession({
             headers:await headers()
         })

@@ -81,6 +81,25 @@ function hasVisibleText(message) {
   );
 }
 
+function getChatErrorMessage(chatError) {
+  const rawMessage = chatError?.message || "";
+  const normalizedMessage = rawMessage.trim();
+
+  if (!normalizedMessage) {
+    return "Something went wrong.";
+  }
+
+  if (normalizedMessage.includes("429")) {
+    return "Rate limit reached. Please wait a moment and retry.";
+  }
+
+  if (normalizedMessage.includes("500")) {
+    return "The AI service is temporarily unavailable. Please try again.";
+  }
+
+  return normalizedMessage;
+}
+
 export default function MessageViewWithForm({ chatId }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -128,7 +147,7 @@ export default function MessageViewWithForm({ chatId }) {
     messages: [],
     onError: chatError => {
       console.error("[chat-ui] useChat error", chatError);
-      setClientError(chatError.message || "The request failed.");
+      setClientError(getChatErrorMessage(chatError));
     },
     onFinish: ({ message, isError, finishReason }) => {
       console.log("[chat-ui] stream finished", {
@@ -136,6 +155,10 @@ export default function MessageViewWithForm({ chatId }) {
         isError,
         parts: message?.parts?.length ?? 0,
       });
+
+      if (isError || finishReason === "error") {
+        return;
+      }
 
       if (!hasVisibleText(message)) {
         setClientError("The assistant returned an empty response.");
@@ -312,7 +335,7 @@ export default function MessageViewWithForm({ chatId }) {
     <div className="relative mx-auto h-[calc(100vh-4rem)] max-w-4xl p-6 size-full">
       <div className="flex h-full flex-col">
         <Conversation className="h-full">
-          <ConversationContent>
+          <ConversationContent data-testid="message-container">
             {messages.length === 0 ? (
               <div className="flex h-full items-center justify-center text-gray-500">
                 Start a conversation...
@@ -330,7 +353,7 @@ export default function MessageViewWithForm({ chatId }) {
                             from={message.role}
                             key={`${message.id ?? messageIndex}-${partIndex}`}
                           >
-                            <MessageContent>
+                            <MessageContent data-testid={`message-${message.role}`}>
                               <Response>{part.text}</Response>
                             </MessageContent>
                           </Message>
@@ -377,7 +400,10 @@ export default function MessageViewWithForm({ chatId }) {
             )}
 
             {(clientError || error) && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div
+                className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                data-testid="error-message"
+              >
                 {clientError || error?.message || "Something went wrong."}
               </div>
             )}
@@ -393,12 +419,14 @@ export default function MessageViewWithForm({ chatId }) {
                   key={suggestion}
                   onClick={handleSuggestionClick}
                   suggestion={suggestion}
+                  data-testid={`suggestion-${suggestion.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                 />
               ))}
             </Suggestions>
           )}
           <PromptInputBody>
             <PromptInputTextarea
+              data-testid="chat-input"
               disabled={status === "streaming"}
               name="message"
               placeholder="Type your message..."
@@ -432,7 +460,7 @@ export default function MessageViewWithForm({ chatId }) {
                 )
               )}
             </PromptInputTools>
-            <PromptInputSubmit disabled={!activeModel} status={status} />
+            <PromptInputSubmit data-testid="send-button" disabled={!activeModel} status={status} />
           </PromptInputToolbar>
         </PromptInput>
       </div>

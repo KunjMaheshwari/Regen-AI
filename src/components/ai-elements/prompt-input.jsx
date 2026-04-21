@@ -550,6 +550,7 @@ export const PromptInputSubmit = ({
   size = "icon",
   status,
   children,
+  "data-testid": dataTestId,
   ...props
 }) => {
   let Icon = <SendIcon className="size-4" />;
@@ -566,6 +567,7 @@ export const PromptInputSubmit = ({
     <Button
       aria-label="Submit"
       className={cn("gap-1.5 rounded-lg", className)}
+      data-testid={dataTestId}
       size={size}
       type="submit"
       variant={variant}
