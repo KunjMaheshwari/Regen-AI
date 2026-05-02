@@ -8,6 +8,7 @@ import { MessageRole, MessageType } from "@prisma/client";
 import { generateHashKey, getCache, setCache } from "@/lib/cache";
 import { invalidateUserChatCache } from "@/lib/chat-history-cache";
 import db from "@/lib/db";
+import { requiredEnv } from "@/lib/env";
 import { CHAT_SYSTEM_PROMPT } from "@/lib/prompt";
 import {
   createSemanticCacheKey,
@@ -16,8 +17,11 @@ import {
 } from "@/lib/semantic-cache";
 
 const provider = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
+  apiKey: requiredEnv("OPENROUTER_API_KEY"),
 });
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const MAX_RETRIES = 2;
@@ -585,14 +589,6 @@ export async function POST(request) {
       skipUserMessage,
       incomingMessages: Array.isArray(incomingMessages) ? incomingMessages.length : 0,
     });
-
-    if (!process.env.OPENROUTER_API_KEY) {
-      console.error("[/api/chat] Missing OPENROUTER_API_KEY");
-      return jsonResponse(
-        { error: "Missing OPENROUTER_API_KEY on the server." },
-        500,
-      );
-    }
 
     let uiMessages = Array.isArray(incomingMessages)
       ? incomingMessages.map(normalizeUIMessage).filter(Boolean)

@@ -2,6 +2,8 @@ import "server-only";
 
 import Redis from "ioredis";
 
+import { requiredEnv } from "@/lib/env";
+
 type RedisGlobal = typeof globalThis & {
   redis?: Redis;
 };
@@ -9,13 +11,7 @@ type RedisGlobal = typeof globalThis & {
 const globalForRedis = globalThis as RedisGlobal;
 
 function getRedisUrl() {
-  const redisUrl = process.env.REDIS_URL;
-
-  if (!redisUrl) {
-    throw new Error("Missing REDIS_URL environment variable.");
-  }
-
-  return redisUrl;
+  return requiredEnv("REDIS_URL");
 }
 
 function createRedisClient() {

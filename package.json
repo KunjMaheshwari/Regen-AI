@@ -7,13 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "postinstall": "prisma generate",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.170",
     "@base-ui/react": "^1.4.0",
     "@openrouter/ai-sdk-provider": "^2.8.0",
-    "@openrouter/sdk": "^0.12.12",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",

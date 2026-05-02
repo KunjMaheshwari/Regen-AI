@@ -1,12 +1,15 @@
-import { success } from "better-auth";
 import { NextResponse } from "next/server";
 
-export async function GET(req) {
+import { requiredEnv } from "@/lib/env";
+
+export const runtime = "nodejs";
+
+export async function GET() {
     try {
         const response = await fetch("https://openrouter.ai/api/v1/models", {
             method: "GET",
             headers: {
-                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                'Authorization': `Bearer ${requiredEnv("OPENROUTER_API_KEY")}`,
                 "Content-Type": "application/json"
             }
         });
