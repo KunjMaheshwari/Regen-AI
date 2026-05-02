@@ -1,9 +1,19 @@
-import { convertToModelMessages, streamText } from "ai";
+import {
+  convertToModelMessages,
+  streamText,
+} from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { MessageRole, MessageType } from "@prisma/client";
 
+import { generateHashKey, getCache, setCache } from "@/lib/cache";
+import { invalidateUserChatCache } from "@/lib/chat-history-cache";
 import db from "@/lib/db";
 import { CHAT_SYSTEM_PROMPT } from "@/lib/prompt";
+import {
+  createSemanticCacheKey,
+  getSemanticCache,
+  setSemanticCache,
+} from "@/lib/semantic-cache";
 
 const provider = createOpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY,
@@ -12,6 +22,7 @@ const provider = createOpenRouter({
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 700;
+const CACHE_TTL_SECONDS = 60 * 60;
 const FALLBACK_MESSAGE =
   "The AI service is temporarily unavailable. Please try again in a moment.";
 
@@ -224,6 +235,322 @@ function getMessagePreview(message) {
     .slice(0, 120);
 }
 
+function stableSerialize(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableSerialize);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        result[key] = stableSerialize(value[key]);
+        return result;
+      }, {});
+  }
+
+  return value;
+}
+
+function createCacheKey({ model, modelMessages }) {
+  return generateHashKey(
+    JSON.stringify(
+      stableSerialize({
+        scope: "openrouter-chat-completion",
+        prompt: {
+          system: CHAT_SYSTEM_PROMPT,
+          messages: modelMessages,
+        },
+        model,
+        parameters: {
+          sendReasoning: true,
+        },
+      }),
+    ),
+  );
+}
+
+function createPromptText(modelMessages) {
+  return JSON.stringify(
+    stableSerialize({
+      system: CHAT_SYSTEM_PROMPT,
+      messages: modelMessages,
+    }),
+  );
+}
+
+function createSemanticScope({ model }) {
+  return JSON.stringify(
+    stableSerialize({
+      scope: "openrouter-chat-completion",
+      model,
+      parameters: {
+        sendReasoning: true,
+      },
+    }),
+  );
+}
+
+async function readChatCache(cacheKey) {
+  try {
+    return await getCache(cacheKey);
+  } catch (error) {
+    console.warn("[/api/chat] Redis cache read failed; continuing without cache", {
+      cacheKey,
+      error: getErrorMessage(error),
+    });
+    return null;
+  }
+}
+
+async function writeChatCache(cacheKey, payload) {
+  try {
+    await setCache(cacheKey, payload, CACHE_TTL_SECONDS);
+  } catch (error) {
+    console.warn("[/api/chat] Redis cache write failed", {
+      cacheKey,
+      error: getErrorMessage(error),
+    });
+  }
+}
+
+async function readSemanticChatCache({ semanticCacheKey, promptText }) {
+  try {
+    return await getSemanticCache({
+      key: semanticCacheKey,
+      prompt: promptText,
+    });
+  } catch (error) {
+    console.warn("[/api/chat] Redis semantic cache read failed; continuing without cache", {
+      semanticCacheKey,
+      error: getErrorMessage(error),
+    });
+    return null;
+  }
+}
+
+async function writeSemanticChatCache({ semanticCacheKey, promptText, payload }) {
+  try {
+    await setSemanticCache({
+      key: semanticCacheKey,
+      prompt: promptText,
+      payload,
+      ttl: CACHE_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.warn("[/api/chat] Redis semantic cache write failed", {
+      semanticCacheKey,
+      error: getErrorMessage(error),
+    });
+  }
+}
+
+function getCacheableParts(message) {
+  return Array.isArray(message?.parts)
+    ? message.parts.filter(
+      part =>
+        (part?.type === "text" || part?.type === "reasoning") &&
+        typeof part.text === "string" &&
+        part.text.trim(),
+    )
+    : [];
+}
+
+function createCachePayload(responseMessage, finishReason) {
+  const parts = getCacheableParts(responseMessage);
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return {
+    data: {
+      role: responseMessage.role || "assistant",
+      parts,
+    },
+    finishReason: finishReason || "stop",
+  };
+}
+
+async function persistChatMessages({
+  chatId,
+  skipUserMessage,
+  uiMessages,
+  responseMessage,
+  model,
+  isAborted,
+}) {
+  if (!chatId || isAborted) {
+    return;
+  }
+
+  try {
+    const messagesToSave = [];
+    const latestUserMessage = [...uiMessages]
+      .reverse()
+      .find(message => message.role === "user");
+
+    if (!skipUserMessage && latestUserMessage) {
+      messagesToSave.push({
+        chatId,
+        content: serializeMessageParts(latestUserMessage),
+        messageRole: MessageRole.USER,
+        model,
+        messageType: MessageType.NORMAL,
+      });
+    }
+
+    const assistantContent = serializeMessageParts(responseMessage);
+    const parsedAssistantParts = JSON.parse(assistantContent);
+
+    if (parsedAssistantParts.length === 0) {
+      console.warn("[/api/chat] Empty assistant response; skipping persistence");
+      return;
+    }
+
+    messagesToSave.push({
+      chatId,
+      content: assistantContent,
+      messageRole: MessageRole.ASSISTANT,
+      model,
+      messageType: MessageType.NORMAL,
+    });
+
+    await db.message.createMany({
+      data: messagesToSave,
+    });
+
+    const chat = await db.chat.findUnique({
+      where: { id: chatId },
+      select: { userId: true },
+    });
+
+    await invalidateUserChatCache(chat?.userId);
+
+    console.log("[/api/chat] Persisted messages", {
+      chatId,
+      count: messagesToSave.length,
+    });
+  } catch (error) {
+    console.error("[/api/chat] Failed to persist messages", error);
+  }
+}
+
+function createSseLine(payload) {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+function createCachedResponseMessage(cachedPayload) {
+  return {
+    id: crypto.randomUUID(),
+    role: cachedPayload.data.role || "assistant",
+    parts: cachedPayload.data.parts,
+  };
+}
+
+function createCachedResponseBody({ cachedPayload, responseMessage }) {
+  const metadata = {
+    data: cachedPayload.data,
+    cached: true,
+    cacheType: cachedPayload.cacheType || "exact",
+    similarity: cachedPayload.similarity,
+  };
+  const events = [
+    {
+      type: "start",
+      messageId: responseMessage.id,
+      messageMetadata: metadata,
+    },
+    {
+      type: "data-cache",
+      data: metadata,
+      transient: true,
+    },
+  ];
+
+  responseMessage.parts.forEach((part, index) => {
+    const id = `cached-${part.type}-${index}`;
+
+    if (part.type === "text") {
+      events.push(
+        {
+          type: "text-start",
+          id,
+        },
+        {
+          type: "text-delta",
+          id,
+          delta: part.text,
+        },
+        {
+          type: "text-end",
+          id,
+        },
+      );
+      return;
+    }
+
+    if (part.type === "reasoning") {
+      events.push(
+        {
+          type: "reasoning-start",
+          id,
+        },
+        {
+          type: "reasoning-delta",
+          id,
+          delta: part.text,
+        },
+        {
+          type: "reasoning-end",
+          id,
+        },
+      );
+    }
+  });
+
+  events.push({
+    type: "finish",
+    finishReason: cachedPayload.finishReason || "stop",
+    messageMetadata: metadata,
+  });
+
+  return `${events.map(createSseLine).join("")}data: [DONE]\n\n`;
+}
+
+async function createCachedResponse({
+  cachedPayload,
+  uiMessages,
+  chatId,
+  skipUserMessage,
+  model,
+}) {
+  const responseMessage = createCachedResponseMessage(cachedPayload);
+
+  console.log("[/api/chat] Returning cached response immediately", {
+    chatId,
+    finishReason: cachedPayload.finishReason || "stop",
+    preview: getMessagePreview(responseMessage),
+  });
+
+  await persistChatMessages({
+    chatId,
+    skipUserMessage,
+    uiMessages,
+    responseMessage,
+    model,
+    isAborted: false,
+  });
+
+  return new Response(createCachedResponseBody({ cachedPayload, responseMessage }), {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 async function getRequestBody(request) {
   try {
     return await request.json();
@@ -301,6 +628,64 @@ export async function POST(request) {
       totalMessages: modelMessages.length,
       lastRole: uiMessages.at(-1)?.role,
       lastPreview: getMessagePreview(uiMessages.at(-1)),
+      model,
+    });
+
+    const cacheKey = createCacheKey({ model, modelMessages });
+    const promptText = createPromptText(modelMessages);
+    const semanticCacheKey = createSemanticCacheKey(
+      createSemanticScope({ model }),
+    );
+    const cachedPayload = await readChatCache(cacheKey);
+
+    if (cachedPayload?.data?.parts?.length > 0) {
+      console.log("[/api/chat] Redis cache hit", {
+        cacheKey,
+        model,
+        parts: cachedPayload.data.parts.length,
+      });
+
+      return createCachedResponse({
+        cachedPayload,
+        uiMessages,
+        chatId,
+        skipUserMessage,
+        model,
+      });
+    }
+
+    console.log("[/api/chat] Redis cache miss", {
+      cacheKey,
+      model,
+    });
+
+    const semanticMatch = await readSemanticChatCache({
+      semanticCacheKey,
+      promptText,
+    });
+
+    if (semanticMatch?.payload?.data?.parts?.length > 0) {
+      console.log("[/api/chat] Redis semantic cache hit", {
+        semanticCacheKey,
+        model,
+        similarity: semanticMatch.similarity,
+      });
+
+      return createCachedResponse({
+        cachedPayload: {
+          ...semanticMatch.payload,
+          cacheType: "semantic",
+          similarity: semanticMatch.similarity,
+        },
+        uiMessages,
+        chatId,
+        skipUserMessage,
+        model,
+      });
+    }
+
+    console.log("[/api/chat] Redis semantic cache miss", {
+      semanticCacheKey,
       model,
     });
 
@@ -383,9 +768,16 @@ export async function POST(request) {
       );
     }
 
+    const liveMetadata = {
+      data: null,
+      cached: false,
+    };
+
     return result.toUIMessageStreamResponse({
       originalMessages: uiMessages,
       sendReasoning: true,
+      messageMetadata: ({ part }) =>
+        part.type === "start" || part.type === "finish" ? liveMetadata : undefined,
       onFinish: async ({ responseMessage, isAborted, finishReason }) => {
         console.log("[/api/chat] UI stream finished", {
           chatId,
@@ -394,53 +786,28 @@ export async function POST(request) {
           preview: getMessagePreview(responseMessage),
         });
 
-        if (!chatId || isAborted) {
+        if (isAborted) {
           return;
         }
 
-        try {
-          const messagesToSave = [];
-          const latestUserMessage = [...uiMessages]
-            .reverse()
-            .find(message => message.role === "user");
-
-          if (!skipUserMessage && latestUserMessage) {
-            messagesToSave.push({
-              chatId,
-              content: serializeMessageParts(latestUserMessage),
-              messageRole: MessageRole.USER,
-              model,
-              messageType: MessageType.NORMAL,
-            });
-          }
-
-          const assistantContent = serializeMessageParts(responseMessage);
-          const parsedAssistantParts = JSON.parse(assistantContent);
-
-          if (parsedAssistantParts.length === 0) {
-            console.warn("[/api/chat] Empty assistant response; skipping persistence");
-            return;
-          }
-
-          messagesToSave.push({
-            chatId,
-            content: assistantContent,
-            messageRole: MessageRole.ASSISTANT,
-            model,
-            messageType: MessageType.NORMAL,
+        const cachePayload = createCachePayload(responseMessage, finishReason);
+        if (cachePayload) {
+          await writeChatCache(cacheKey, cachePayload);
+          await writeSemanticChatCache({
+            semanticCacheKey,
+            promptText,
+            payload: cachePayload,
           });
-
-          await db.message.createMany({
-            data: messagesToSave,
-          });
-
-          console.log("[/api/chat] Persisted messages", {
-            chatId,
-            count: messagesToSave.length,
-          });
-        } catch (error) {
-          console.error("[/api/chat] Failed to persist messages", error);
         }
+
+        await persistChatMessages({
+          chatId,
+          skipUserMessage,
+          uiMessages,
+          responseMessage,
+          model,
+          isAborted,
+        });
       },
       onError: error => {
         const status = getStatusCode(error);

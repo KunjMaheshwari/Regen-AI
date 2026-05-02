@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cacheUserChats, getCachedUserChats, invalidateUserChatCache } from "@/lib/chat-history-cache";
 import { getE2ETestChat, isE2ETestMode } from "@/lib/e2e-test-mode";
 
 export const createChatWithMessage = async (values) => {
@@ -66,6 +67,7 @@ export const createChatWithMessage = async (values) => {
             }
         });
 
+        await invalidateUserChatCache(user.id);
         revalidatePath("/");
 
         return {
@@ -106,6 +108,15 @@ export const getAllChats = async () => {
             }
         }
 
+        const cachedChats = await getCachedUserChats(user.id);
+        if (cachedChats) {
+            return {
+                success: true,
+                message: "Chats fetched successfully",
+                data: cachedChats
+            };
+        }
+
         const chats = await db.chat.findMany({
             where: {
                 userId: user.id
@@ -117,6 +128,8 @@ export const getAllChats = async () => {
                 createdAt: "desc"
             }
         });
+
+        await cacheUserChats(user.id, chats);
 
         return {
             success: true,
@@ -227,6 +240,7 @@ export const deleteChat = async (chatId) => {
                 id: chatId
             }
         });
+        await invalidateUserChatCache(user.id);
         revalidatePath(`/chat/${chatId}`);
         return {
             success: true,
