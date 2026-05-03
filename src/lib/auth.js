@@ -12,5 +12,6 @@ export const auth = betterAuth({
             clientId: requiredEnv("GITHUB_CLIENT_ID"),
             clientSecret: requiredEnv("GITHUB_CLIENT_SECRET")
         }
-    }
+    },
+    baseURL: requiredEnv("BETTER_AUTH_URL")
 });
